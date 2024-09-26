@@ -1,4 +1,4 @@
-from flask import Flask, request, Response, jsonify
+from flask import Flask, request, Response, jsonify, send_from_directory
 from flask_cors import CORS  # Import CORS
 from azure.storage.blob import BlobServiceClient
 from azure.search.documents import SearchClient
@@ -11,11 +11,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize Flask app
-app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+app = Flask(__name__, static_folder='build')
 
-# Alternatively, if you want to restrict to certain origins (like your React app):
-# CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
+@app.route('/')
+def serve_react():
+    return send_from_directory(app.static_folder, 'index.html')
 
 # Azure Blob and Search configurations
 blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_BLOB_CONNECTION_STRING"))
