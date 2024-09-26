@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -17,7 +16,10 @@ function App() {
     formData.append('file', file);
     
     try {
-      await axios.post('http://localhost:5000/upload', formData);
+      await fetch('http://localhost:5000/upload', {
+        method: 'POST',
+        body: formData
+      });
       alert('File uploaded successfully');
     } catch (error) {
       console.error(error);
@@ -27,7 +29,9 @@ function App() {
 
   const handleFileDelete = async () => {
     try {
-      await axios.delete(`http://localhost:5000/delete?filename=${filename}`);
+      await fetch(`http://localhost:5000/delete?filename=${filename}`, {
+        method: 'DELETE'
+      });
       alert('File deleted successfully');
     } catch (error) {
       console.error(error);
@@ -36,9 +40,27 @@ function App() {
   };
 
   const handleChatGPT = async () => {
+    setChatResponse(''); // Reset the chat response before starting
+
     try {
-      const response = await axios.post('http://localhost:5000/chat', { prompt, context });
-      setChatResponse(response.data.response);
+      const response = await fetch('http://localhost:5000/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ prompt, query: context })
+      });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: streamDone } = await reader.read();
+        done = streamDone;
+        const chunk = decoder.decode(value, { stream: true });
+        setChatResponse((prev) => prev + chunk); // Append the new chunk to the response
+      }
     } catch (error) {
       console.error(error);
       alert('Failed to get response');

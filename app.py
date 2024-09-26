@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, Response, jsonify
+from flask_cors import CORS  # Import CORS
 from azure.storage.blob import BlobServiceClient
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
@@ -11,6 +12,10 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
+
+# Alternatively, if you want to restrict to certain origins (like your React app):
+# CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 # Azure Blob and Search configurations
 blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_BLOB_CONNECTION_STRING"))
@@ -52,42 +57,49 @@ def search_documents():
     
     return jsonify(documents), 200
 
-# Generate a response using RAG (Search + GPT)
+# Generate a response using RAG (Search + GPT) with streaming
 @app.route('/chat', methods=['POST'])
 def chat_with_gpt():
     try:
-        data = request.get_json()  # Get the JSON input
+        # Step 1: Get the JSON input and validate the prompt
+        data = request.get_json()
         prompt = data.get("prompt", "")
         if not prompt:
             return jsonify({"error": "Prompt is required"}), 400
-        
-        # Step 1: Search for relevant documents in Azure Cognitive Search
+
+        # Step 2: Search for relevant documents in Azure Cognitive Search
         query = data.get("query", "")
         search_results = search_client.search(query)  # Search based on user query
         documents = [result['content'] for result in search_results]  # Collect the search results
         
-        # Step 2: Combine the search results into a single context
+        # Step 3: Combine the search results into a single context
         context = " ".join(documents)  # Merging all documents into one large context
-        
-        # Step 3: Create the prompt with context and send it to GPT-4
+
+        # Step 4: Send the combined context and user prompt to GPT-4 for augmentation
         full_prompt = f"Context: {context}\n\nPrompt: {prompt}"
-        
-        # Updated OpenAI API call using the new format
-        response = openai.chat_completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": full_prompt}
-            ],
-            max_tokens=150
-        )
 
-        # Extract the response from the new structure
-        gpt_response = response.choices[0]['message']['content'].strip()
+        def generate():
+            print("Starting streaming response from GPT-4...")
+            stream = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": full_prompt}
+                ],
+                stream=True  # Enabling streaming
+            )
 
-        # Step 4: Return the generated response from GPT-4
-        return jsonify({"response": gpt_response}), 200
-    
+            # Streaming the response as it comes in chunks from GPT-4
+            for chunk in stream:
+                if 'choices' in chunk and 'delta' in chunk.choices[0]:
+                    if chunk.choices[0].delta.get('content'):
+                        content = chunk.choices[0].delta['content']
+                        print(f"Sending GPT chunk: {content}")
+                        yield content
+
+        # Step 5: Return the streamed response from GPT-4 to the client
+        return Response(generate(), content_type='text/plain')
+
     except Exception as e:
         return jsonify({"error": f"Failed to process request: {str(e)}"}), 400
 
